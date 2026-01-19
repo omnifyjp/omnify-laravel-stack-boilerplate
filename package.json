@@ -1,0 +1,7 @@
+{
+  "name": "@omnify/laravel-stack-boilerplate",
+  "private": true,
+  "devDependencies": {
+    "@famgia/omnify-core-cli": "^2.0.0"
+  }
+}
