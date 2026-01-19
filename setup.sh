@@ -6,11 +6,19 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Get project name from parent folder
-PROJECT_NAME=$(basename "$(dirname "$(pwd)")")
+# Load .env if exists
+if [ -f ".env" ]; then
+    source .env
+fi
+
+# Set defaults
+BASE_DOMAIN=${BASE_DOMAIN:-$(basename "$(dirname "$(pwd)")")}
+
+# DB prefix (replace - with _)
+DB_PREFIX=$(echo "$BASE_DOMAIN" | tr '-' '_')
 
 echo "Stack: Laravel (Blade + Inertia)"
-echo "Project: $PROJECT_NAME"
+echo "Domain: $BASE_DOMAIN"
 echo ""
 
 # Step 1: Install dependencies
@@ -132,25 +140,61 @@ fi
 # Step 3: Setup environment
 echo ""
 echo "Step 3: Setup environment"
+
 cat > .env << EOF
 APP_NAME=Service
 APP_KEY=
 APP_ENV=local
 APP_DEBUG=true
-APP_URL=https://$PROJECT_NAME.test
+APP_URL=https://$BASE_DOMAIN.test
 
-DB_CONNECTION=sqlite
+# Database (MySQL)
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=${DB_PREFIX}_db
+DB_USERNAME=root
+DB_PASSWORD=
 
-SESSION_DRIVER=cookie
-SESSION_DOMAIN=.$PROJECT_NAME.test
+# Cache & Queue (Redis)
+CACHE_STORE=redis
+QUEUE_CONNECTION=redis
+SESSION_DRIVER=redis
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+REDIS_PREFIX=${DB_PREFIX}_
+
+# Session
+SESSION_DOMAIN=.$BASE_DOMAIN.test
 SESSION_SAME_SITE=lax
 SESSION_SECURE_COOKIE=true
 
-SANCTUM_STATEFUL_DOMAINS=$PROJECT_NAME.test
+SANCTUM_STATEFUL_DOMAINS=$BASE_DOMAIN.test
+
+# Mail (Mailpit)
+MAIL_MAILER=smtp
+MAIL_HOST=127.0.0.1
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_FROM_ADDRESS="no-reply@$BASE_DOMAIN.test"
+MAIL_FROM_NAME="\${APP_NAME}"
+
+# Storage (Minio S3)
+FILESYSTEM_DISK=s3
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=${DB_PREFIX}
+AWS_ENDPOINT=http://127.0.0.1:9000
+AWS_USE_PATH_STYLE_ENDPOINT=true
 
 # SSO Configuration
-SSO_CONSOLE_URL=https://auth-$PROJECT_NAME.test
-SSO_SERVICE_SLUG=service
+SSO_CONSOLE_URL=https://auth-omnify.test
+SSO_SERVICE_SLUG=$BASE_DOMAIN
 SSO_SERVICE_SECRET=local_dev_secret
 EOF
 
@@ -158,12 +202,23 @@ php artisan key:generate --force
 
 # Publish SSO config
 php artisan vendor:publish --tag=sso-client-config --force 2>/dev/null || true
+
+# Create MySQL database
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS ${DB_PREFIX}_db;" 2>/dev/null || true
+echo "✓ MySQL database: ${DB_PREFIX}_db"
+
+# Create Minio bucket
+if command -v mc &> /dev/null; then
+    mc alias set local http://127.0.0.1:9000 minioadmin minioadmin 2>/dev/null || true
+    mc mb local/${DB_PREFIX} 2>/dev/null || true
+    echo "✓ Minio bucket: ${DB_PREFIX}"
+fi
+
 echo "✓ Environment configured"
 
 # Step 4: Initialize database
 echo ""
 echo "Step 4: Initialize database"
-touch database/database.sqlite
 php artisan migrate --force
 echo "✓ Database ready"
 
@@ -207,13 +262,13 @@ fi
 echo ""
 echo "Step 6: Link to Herd"
 cd app
-herd link $PROJECT_NAME
-herd secure $PROJECT_NAME
-echo "✓ https://$PROJECT_NAME.test"
+herd link $BASE_DOMAIN
+herd secure $BASE_DOMAIN
+echo "✓ https://$BASE_DOMAIN.test"
 
 echo ""
 echo "Done!"
-echo "  App: https://$PROJECT_NAME.test"
+echo "  App: https://$BASE_DOMAIN.test"
 echo ""
 echo "SVN Commands:"
 echo "  svn checkout <repo-url> .   # Checkout existing repo"
